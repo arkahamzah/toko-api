@@ -4,13 +4,12 @@ from sqlalchemy.orm import Session
 from app.database import engine, get_db
 from app.models import Produk, Order, Base
 from app.cache import get_cache, set_cache, delete_cache
+from app.tasks import kirim_email, proses_order
 import json
 
 Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="Toko API")
 
-# Schema
 class ProdukRequest(BaseModel):
     nama: str
     harga: int
@@ -18,10 +17,10 @@ class ProdukRequest(BaseModel):
 
 class OrderRequest(BaseModel):
     nama_pembeli: str
+    email: str
     jumlah: int
     produk_id: int
 
-# PRODUK
 @app.get("/produk")
 def list_produk(db: Session = Depends(get_db)):
     cached = get_cache("produk:all")
@@ -51,7 +50,6 @@ def hapus_produk(produk_id: int, db: Session = Depends(get_db)):
     delete_cache("produk:all")
     return {"pesan": "Produk berhasil dihapus!"}
 
-# ORDER
 @app.post("/order")
 def buat_order(data: OrderRequest, db: Session = Depends(get_db)):
     produk = db.query(Produk).filter(Produk.id == data.produk_id).first()
@@ -64,10 +62,16 @@ def buat_order(data: OrderRequest, db: Session = Depends(get_db)):
     db.add(order)
     db.commit()
     db.refresh(order)
+
+    # Kirim ke background — tidak blokir response!
+    kirim_email.delay(data.email, f"Order {produk.nama} x{data.jumlah} berhasil!")
+    proses_order.delay(order.id)
+
     return {
         "id": order.id,
         "nama_pembeli": order.nama_pembeli,
         "produk": produk.nama,
         "jumlah": order.jumlah,
-        "total": produk.harga * order.jumlah
+        "total": produk.harga * order.jumlah,
+        "pesan": "Order berhasil! Email konfirmasi sedang dikirim."
     }
