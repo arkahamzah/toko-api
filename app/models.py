@@ -8,6 +8,7 @@ class Produk(Base):
     nama = Column(String, nullable=False)
     harga = Column(Integer, nullable=False)
     stok = Column(Integer, default=0)
+    deskripsi = Column(String, nullable=True)  # kolom baru!
     orders = relationship("Order", back_populates="produk")
 
 class Order(Base):
