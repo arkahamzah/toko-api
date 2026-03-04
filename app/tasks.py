@@ -1,14 +1,13 @@
-from celery import Celery
-import time
 import os
+import time
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-celery_app = Celery(
-    "tasks",
-    broker=REDIS_URL,
-    backend=REDIS_URL
-)
+def get_celery():
+    from celery import Celery
+    return Celery("tasks", broker=REDIS_URL, backend=REDIS_URL)
+
+celery_app = get_celery()
 
 @celery_app.task
 def kirim_email(email: str, pesan: str):

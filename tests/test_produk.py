@@ -15,6 +15,7 @@ def test_buat_order_sukses(client):
     }).json()
     response = client.post("/order", json={
         "nama_pembeli": "Arka",
+        "email": "arka@email.com",
         "jumlah": 2,
         "produk_id": produk["id"]
     })
@@ -27,6 +28,7 @@ def test_stok_tidak_cukup(client):
     }).json()
     response = client.post("/order", json={
         "nama_pembeli": "Budi",
+        "email": "budi@email.com",
         "jumlah": 99,
         "produk_id": produk["id"]
     })
