@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import engine, get_db
 from app.models import Produk, Order, Base
 from app.cache import get_cache, set_cache, delete_cache
 from app.tasks import kirim_email, proses_order
+from app.notifications import manager
+from app.auth import buat_token, verifikasi_token
 import json
 
 Base.metadata.create_all(bind=engine)
@@ -20,6 +22,33 @@ class OrderRequest(BaseModel):
     email: str
     jumlah: int
     produk_id: int
+
+# 🔑 Endpoint generate token (simulasi login)
+@app.post("/token")
+def get_token(username: str):
+    token = buat_token({"sub": username})
+    return {"access_token": token, "token_type": "bearer"}
+
+# 🔒 WebSocket dengan Auth
+@app.websocket("/ws/notifikasi")
+async def websocket_notifikasi(
+    websocket: WebSocket,
+    token: str = Query(...)  # ambil token dari ?token=...
+):
+    payload = verifikasi_token(token)
+    if not payload:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    username = payload.get("sub")
+    await manager.connect(websocket)
+    print(f"🔐 {username} terhubung via WebSocket")
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 @app.get("/produk")
 def list_produk(db: Session = Depends(get_db)):
@@ -51,7 +80,7 @@ def hapus_produk(produk_id: int, db: Session = Depends(get_db)):
     return {"pesan": "Produk berhasil dihapus!"}
 
 @app.post("/order")
-def buat_order(data: OrderRequest, db: Session = Depends(get_db)):
+async def buat_order(data: OrderRequest, db: Session = Depends(get_db)):
     produk = db.query(Produk).filter(Produk.id == data.produk_id).first()
     if not produk:
         raise HTTPException(status_code=404, detail="Produk tidak ditemukan!")
@@ -62,11 +91,17 @@ def buat_order(data: OrderRequest, db: Session = Depends(get_db)):
     db.add(order)
     db.commit()
     db.refresh(order)
-
-    # Kirim ke background — tidak blokir response!
     kirim_email.delay(data.email, f"Order {produk.nama} x{data.jumlah} berhasil!")
     proses_order.delay(order.id)
-
+    await manager.broadcast({
+        "event": "new_order",
+        "order_id": order.id,
+        "nama_pembeli": order.nama_pembeli,
+        "produk": produk.nama,
+        "jumlah": order.jumlah,
+        "total": produk.harga * order.jumlah,
+        "pesan": f"Order baru #{order.id} masuk!"
+    })
     return {
         "id": order.id,
         "nama_pembeli": order.nama_pembeli,
