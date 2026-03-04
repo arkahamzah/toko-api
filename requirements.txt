@@ -6,3 +6,6 @@ redis
 celery
 pytest
 httpx
+websockets
+python-jose[cryptography]
+passlib[bcrypt]
